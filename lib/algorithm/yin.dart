@@ -71,12 +71,13 @@ class Yin extends PitchAlgorithm {
       _yinBuffer[tau] = 0;
     }
     for (tau = 1; tau < _yinBuffer.length; tau++) {
-      for (index = 0; index < _yinBuffer.length; index++) {
+      for (index = 0; index < _yinBuffer.length && index + tau < audioBuffer.length; index++) {
         delta = audioBuffer[index] - audioBuffer[index + tau];
         _yinBuffer[tau] += delta * delta;
       }
     }
   }
+
 
   //The cumulative mean normalized difference function as described in step 3 of the YIN paper.
   void _cumulativeMeanNormalizedDifference() {
