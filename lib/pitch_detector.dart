@@ -7,8 +7,8 @@ import 'package:pitch_detector_dart/pitch_detector_result.dart';
 class PitchDetector {
   final PitchAlgorithm _pitchAlgorithm;
 
-  PitchDetector(double audioSampleRate, int bufferSize)
-      : this._pitchAlgorithm = new Yin(audioSampleRate, bufferSize);
+  PitchDetector(double audioSampleRate, int bufferSize, [double? threshold])
+      : this._pitchAlgorithm = new Yin(audioSampleRate, bufferSize, threshold);
 
   PitchDetectorResult getPitch(final List<double> audioBuffer) {
     return _pitchAlgorithm.getPitch(audioBuffer);

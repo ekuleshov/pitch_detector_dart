@@ -8,29 +8,26 @@ import 'package:pitch_detector_dart/pitch_detector_result.dart';
 //  Ported by Techpotatoes - Lucas Bento
 
 class Yin extends PitchAlgorithm {
-  //The default YIN threshold value. Should be around 0.10~0.15. See YIN
-  //paper for more information.
+  /// The default YIN threshold value. Should be around 0.10~0.15. See YIN paper for more information.
   static final double DEFAULT_THRESHOLD = 0.20;
-  //The default size of an audio buffer (in samples).
-  static final int DEFAULT_BUFFER_SIZE = 2048;
-  //The default overlap of two consecutive audio buffers (in samples).
-  static final int DEFAULT_OVERLAP = 1536;
+
+  // The default size of an audio buffer (in samples).
+  // static final int DEFAULT_BUFFER_SIZE = 2048;
+
+  // The default overlap of two consecutive audio buffers (in samples).
+  // static final int DEFAULT_OVERLAP = 1536;
 
   final double _threshold;
   final double _sampleRate;
   final List<double> _yinBuffer;
-  final PitchDetectorResult _result;
 
-  Yin(double audioSampleRate, int bufferSize)
+  Yin(double audioSampleRate, int bufferSize, [double? threshold])
       : this._sampleRate = audioSampleRate,
-        this._threshold = DEFAULT_THRESHOLD,
-        this._yinBuffer = List<double>.filled(bufferSize ~/ 2, 0.0),
-        this._result = new PitchDetectorResult.empty();
+        this._threshold = threshold ?? DEFAULT_THRESHOLD,
+        this._yinBuffer = List<double>.filled(bufferSize ~/ 2, 0.0);
 
   @override
   PitchDetectorResult getPitch(final List<double> audioBuffer) {
-    final int tauEstimate;
-    final double pitchInHertz;
 
     // step 2
     _difference(audioBuffer);
@@ -38,8 +35,10 @@ class Yin extends PitchAlgorithm {
     // step 3
     _cumulativeMeanNormalizedDifference();
 
+    PitchDetectorResult result = PitchDetectorResult.empty();
+
     // step 4
-    tauEstimate = _absoluteThreshold();
+    final int tauEstimate = _absoluteThreshold(result);
 
     // step 5
     if (tauEstimate != -1) {
@@ -52,46 +51,40 @@ class Yin extends PitchAlgorithm {
       // bestLocalEstimate()
 
       // conversion to Hz
-      pitchInHertz = _sampleRate / betterTau;
+      result.pitch = _sampleRate / betterTau;
     } else {
       // no pitch found
-      pitchInHertz = -1;
+      result.pitch = -1;
     }
 
-    _result.pitch = pitchInHertz;
-
-    return _result;
+    return result;
   }
 
   //Implements the difference function as described in step 2 of the YIN
   void _difference(final List<double> audioBuffer) {
-    int index, tau;
-    double delta;
-    for (tau = 0; tau < _yinBuffer.length; tau++) {
+    for (int tau = 0; tau < _yinBuffer.length; tau++) {
       _yinBuffer[tau] = 0;
     }
-    for (tau = 1; tau < _yinBuffer.length; tau++) {
-      for (index = 0; index < _yinBuffer.length && index + tau < audioBuffer.length; index++) {
-        delta = audioBuffer[index] - audioBuffer[index + tau];
+    for (int tau = 1; tau < _yinBuffer.length; tau++) {
+      for (int index = 0; index < _yinBuffer.length && index + tau < audioBuffer.length; index++) {
+        double delta = audioBuffer[index] - audioBuffer[index + tau];
         _yinBuffer[tau] += delta * delta;
       }
     }
   }
 
-
-  //The cumulative mean normalized difference function as described in step 3 of the YIN paper.
+  /// The cumulative mean normalized difference function as described in step 3 of the YIN paper.
   void _cumulativeMeanNormalizedDifference() {
-    int tau;
     _yinBuffer[0] = 1;
     double runningSum = 0;
-    for (tau = 1; tau < _yinBuffer.length; tau++) {
+    for (int tau = 1; tau < _yinBuffer.length; tau++) {
       runningSum += _yinBuffer[tau];
       _yinBuffer[tau] *= tau / runningSum;
     }
   }
 
-  //Implements step 4 of the AUBIO_YIN paper.
-  int _absoluteThreshold() {
+  /// Implements step 4 of the AUBIO_YIN paper.
+  int _absoluteThreshold(PitchDetectorResult result) {
     // Uses another loop construct
     // than the AUBIO implementation
     int tau;
@@ -112,7 +105,7 @@ class Yin extends PitchAlgorithm {
         //
         // Since we want the periodicity and and not aperiodicity:
         // periodicity = 1 - aperiodicity
-        _result.probability = 1 - _yinBuffer[tau];
+        result.probability = 1 - _yinBuffer[tau];
         break;
       }
     }
@@ -120,52 +113,33 @@ class Yin extends PitchAlgorithm {
     // if no pitch found, tau => -1
     if (tau == _yinBuffer.length || _yinBuffer[tau] >= _threshold) {
       tau = -1;
-      _result.probability = 0;
-      _result.pitched = false;
+      result.probability = 0;
+      result.pitched = false;
     } else {
-      _result.pitched = true;
+      result.pitched = true;
     }
 
     return tau;
   }
 
-  //Implements step 5 of the AUBIO_YIN paper. It refines the estimated tau
-  //value using parabolic interpolation. This is needed to detect higher
-  //frequencies more precisely. See http://fizyka.umk.pl/nrbook/c10-2.pdf and
-  // for more background
-  //http://fedc.wiwi.hu-berlin.de/xplore/tutorials/xegbohtmlnode62.html
+  /// Implements step 5 of the AUBIO_YIN paper. It refines the estimated tau
+  /// value using parabolic interpolation. This is needed to detect higher
+  /// frequencies more precisely. See http://fizyka.umk.pl/nrbook/c10-2.pdf and
+  ///  for more background
+  /// http://fedc.wiwi.hu-berlin.de/xplore/tutorials/xegbohtmlnode62.html
   double _parabolicInterpolation(final int tauEstimate) {
-    final double betterTau;
-    final int x0;
-    final int x2;
+    final int x0 = tauEstimate < 1 ? tauEstimate : tauEstimate - 1;
+    final int x2 = tauEstimate + 1 < _yinBuffer.length ? tauEstimate + 1 : tauEstimate;
 
-    if (tauEstimate < 1) {
-      x0 = tauEstimate;
-    } else {
-      x0 = tauEstimate - 1;
-    }
-    if (tauEstimate + 1 < _yinBuffer.length) {
-      x2 = tauEstimate + 1;
-    } else {
-      x2 = tauEstimate;
-    }
+    final double betterTau;
     if (x0 == tauEstimate) {
-      if (_yinBuffer[tauEstimate] <= _yinBuffer[x2]) {
-        betterTau = tauEstimate.toDouble();
-      } else {
-        betterTau = x2.toDouble();
-      }
+      betterTau = (_yinBuffer[tauEstimate] <= _yinBuffer[x2] ? tauEstimate : x2).toDouble();
     } else if (x2 == tauEstimate) {
-      if (_yinBuffer[tauEstimate] <= _yinBuffer[x0]) {
-        betterTau = tauEstimate.toDouble();
-      } else {
-        betterTau = x0.toDouble();
-      }
+      betterTau = (_yinBuffer[tauEstimate] <= _yinBuffer[x0] ? tauEstimate : x0).toDouble();
     } else {
-      double s0, s1, s2;
-      s0 = _yinBuffer[x0];
-      s1 = _yinBuffer[tauEstimate];
-      s2 = _yinBuffer[x2];
+      double s0 = _yinBuffer[x0];
+      double s1 = _yinBuffer[tauEstimate];
+      double s2 = _yinBuffer[x2];
       // fixed AUBIO implementation, thanks to Karl Helgason:
       // (2.0f * s1 - s2 - s0) was incorrectly multiplied with -1
       betterTau = tauEstimate + (s2 - s0) / (2 * (2 * s1 - s2 - s0));
